@@ -1,0 +1,1198 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// User and Authentication Models
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String?
+  avatar        String?
+  password      String?  // For credentials authentication
+  role          UserRole @default(TRADER)
+  status        UserStatus @default(ACTIVE)
+  apiKey        String?
+  apiSecret     String?
+  stripeCustomerId String? // Stripe customer ID for billing
+  emailVerified Boolean? @default(false)
+  country       String?
+  timezone      String?
+  language      String?
+  lastLoginAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  accounts      Account[]
+  sessions      Session[]
+  portfolios    Portfolio[]
+  orders        Order[]
+  trades        Trade[]
+  bots          TradingBot[]
+  exchangeAccounts ExchangeAccount[]
+  blogPosts     BlogPost[]
+  blogComments  BlogComment[]
+  subscription  Subscription?
+  invoices      Invoice[]
+  posts         Post[]
+  notifications Notification[]
+  webhooks      Webhook[]
+  pages         Page[]
+  auditLogs     AuditLog[]
+  comments      Comment[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  TRADER
+  INVESTOR
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+// Billing Models
+model Subscription {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  stripeSubscriptionId   String   @unique
+  stripeCustomerId      String
+  planId                String
+  status                String   // active, canceled, incomplete, incomplete_expired, past_due, trialing, unpaid
+  currentPeriodStart    DateTime
+  currentPeriodEnd      DateTime
+  cancelAtPeriodEnd    Boolean  @default(false)
+  metadata              Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Relations
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoices              Invoice[]
+
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id                    String   @id @default(cuid())
+  userId                String
+  subscriptionId        String
+  stripeInvoiceId       String   @unique
+  stripeSubscriptionId   String
+  amount                Float
+  currency              String
+  status                String
+  hostedInvoiceUrl      String?
+  invoicePdf            String?
+  periodStart           DateTime
+  periodEnd             DateTime
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Relations
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@map("invoices")
+}
+
+// Exchange Models
+model Exchange {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  displayName String
+  logo        String?
+  website     String?
+  apiBaseUrl  String?
+  wsUrl       String?
+  status      ExchangeStatus @default(ACTIVE)
+  features    Json     // Supported features: spot, margin, futures, etc.
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  assets       Asset[]
+  markets      Market[]
+  exchangeAccounts ExchangeAccount[]
+
+  @@map("exchanges")
+}
+
+enum ExchangeStatus {
+  ACTIVE
+  MAINTENANCE
+  DISABLED
+}
+
+model ExchangeAccount {
+  id           String   @id @default(cuid())
+  userId       String
+  exchangeId   String
+  apiKey       String
+  apiSecret    String
+  passphrase   String?  // For exchanges that require it
+  nickname     String?
+  status       AccountStatus @default(ACTIVE)
+  permissions  Json     // Trading, withdrawal, etc.
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exchange     Exchange @relation(fields: [exchangeId], references: [id], onDelete: Cascade)
+  orders       Order[]
+  trades       Trade[]
+
+  @@unique([userId, exchangeId])
+  @@map("exchange_accounts")
+}
+
+enum AccountStatus {
+  ACTIVE
+  DISABLED
+  ERROR
+}
+
+// Asset and Market Models
+model Asset {
+  id          String   @id @default(cuid())
+  symbol      String   @unique
+  name        String
+  type        AssetType
+  precision   Int      // Decimal places
+  category    AssetCategory? @default(CRYPTO)
+  description String?
+  website     String?
+  whitepaper  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  exchanges   Exchange[]
+  baseMarkets Market[] @relation("BaseAsset")
+  quoteMarkets Market[] @relation("QuoteAsset")
+  portfolioAssets PortfolioAsset[]
+  correlations1 AssetCorrelation[] @relation("Asset1Correlation")
+  correlations2 AssetCorrelation[] @relation("Asset2Correlation")
+
+  @@map("assets")
+}
+
+enum AssetType {
+  CRYPTO
+  STOCK
+  FOREX
+  COMMODITY
+  ETF
+  BOND
+  REAL_ESTATE
+  CASH
+}
+
+enum AssetCategory {
+  CRYPTO
+  DEFI
+  NFT
+  STOCKS
+  BONDS
+  COMMODITIES
+  REAL_ESTATE
+  CASH_EQUIVALENTS
+  ALTERNATIVE
+}
+
+model Market {
+  id            String   @id @default(cuid())
+  exchangeId    String
+  baseAssetId   String
+  quoteAssetId  String
+  symbol        String   // e.g., BTCUSDT
+  status        MarketStatus @default(ACTIVE)
+  minPrice      Float?
+  maxPrice      Float?
+  tickSize      Float?
+  stepSize      Float?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  exchange      Exchange @relation(fields: [exchangeId], references: [id], onDelete: Cascade)
+  baseAsset     Asset    @relation("BaseAsset", fields: [baseAssetId], references: [id], onDelete: Cascade)
+  quoteAsset    Asset    @relation("QuoteAsset", fields: [quoteAssetId], references: [id], onDelete: Cascade)
+  orders        Order[]
+  trades        Trade[]
+  marketData    MarketData[]
+
+  @@unique([exchangeId, symbol])
+  @@map("markets")
+}
+
+enum MarketStatus {
+  ACTIVE
+  SUSPENDED
+  DELISTED
+}
+
+// Trading Models
+model Order {
+  id              String      @id @default(cuid())
+  userId          String
+  exchangeAccountId String
+  marketId        String
+  type            OrderType
+  side            OrderSide
+  amount          Float
+  price           Float?
+  status          OrderStatus  @default(PENDING)
+  filledAmount    Float       @default(0)
+  filledPrice     Float?
+  fee             Float?
+  feeCurrency     String?
+  clientOrderId   String?     // User-provided order ID
+  exchangeOrderId String?     // Exchange-provided order ID
+  leverage        Int?        // For margin/futures trading
+  // Advanced order fields
+  stopPrice       Float?      // For stop orders
+  takeProfitPrice Float?      // For take profit orders
+  stopLossPrice   Float?      // For stop loss orders
+  icebergQty      Float?      // For iceberg orders
+  trailingStopAmount Float?   // For trailing stop orders
+  trailingStopPercent Float?  // For trailing stop orders
+  ocoGroupId      String?     // For OCO orders
+  ocoSecondaryOrderId String? // For OCO orders
+  timeInForce     String?     // GTC, IOC, FOK
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  executedAt      DateTime?
+
+  // Relations
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exchangeAccount ExchangeAccount @relation(fields: [exchangeAccountId], references: [id], onDelete: Cascade)
+  market          Market      @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  trades          Trade[]
+
+  @@map("orders")
+}
+
+enum OrderType {
+  MARKET
+  LIMIT
+  STOP
+  STOP_LIMIT
+  TAKE_PROFIT
+  TAKE_PROFIT_LIMIT
+  TRAILING_STOP
+  OCO
+  ICEBERG
+  FILL_OR_KILL
+  IMMEDIATE_OR_CANCEL
+}
+
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum OrderStatus {
+  PENDING
+  OPEN
+  PARTIALLY_FILLED
+  FILLED
+  CANCELLED
+  EXPIRED
+  REJECTED
+}
+
+model Trade {
+  id              String   @id @default(cuid())
+  userId          String
+  exchangeAccountId String
+  marketId        String
+  orderId         String?
+  botId           String?
+  side            OrderSide
+  amount          Float
+  price           Float
+  fee             Float?
+  feeCurrency     String?
+  exchangeTradeId String?
+  createdAt       DateTime @default(now())
+
+  // Relations
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exchangeAccount ExchangeAccount @relation(fields: [exchangeAccountId], references: [id], onDelete: Cascade)
+  market          Market      @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  order           Order?      @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  bot             TradingBot? @relation(fields: [botId], references: [id], onDelete: SetNull)
+
+  @@map("trades")
+}
+
+// Portfolio Models
+model Portfolio {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  type        PortfolioType @default(TRADING)
+  status      PortfolioStatus @default(ACTIVE)
+  totalValue  Float    @default(0)
+  targetValue Float?   // For goal-based investing
+  targetDate  DateTime? // For goal-based investing
+  riskLevel   RiskLevel @default(MEDIUM)
+  rebalanceFrequency RebalanceFrequency @default(MANUAL)
+  autoRebalance Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assets      PortfolioAsset[]
+  performance  PortfolioPerformance[]
+  goals        InvestmentGoal[]
+  rebalances   PortfolioRebalance[]
+  taxReports   TaxReport[]
+  defiPositions DeFiPosition[]
+  nfts         NFT[]
+  correlations AssetCorrelation[]
+  performanceAttributions PerformanceAttribution[]
+
+  @@unique([userId, name])
+  @@map("portfolios")
+}
+
+enum PortfolioType {
+  TRADING
+  INVESTMENT
+  SIMULATION
+  RETIREMENT
+  EDUCATION
+  EMERGENCY_FUND
+}
+
+enum PortfolioStatus {
+  ACTIVE
+  ARCHIVED
+  CLOSED
+  FROZEN
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  AGGRESSIVE
+}
+
+enum RebalanceFrequency {
+  MANUAL
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+model PortfolioAsset {
+  id          String   @id @default(cuid())
+  portfolioId String
+  assetId     String
+  amount      Float
+  avgPrice    Float?
+  value       Float?
+  costBasis   Float?   // For tax calculations
+  acquisitionDate DateTime?
+  targetAllocation Float? // For rebalancing
+  currentAllocation Float? // Current percentage allocation
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  asset       Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  dividends    Dividend[]
+  stakingRewards StakingReward[]
+  rebalanceTrades RebalanceTrade[]
+  taxLots     TaxLot[]
+
+  @@unique([portfolioId, assetId])
+  @@map("portfolio_assets")
+}
+
+model PortfolioPerformance {
+  id          String   @id @default(cuid())
+  portfolioId String
+  date        DateTime @default(now())
+  totalValue  Float
+  dailyChange Float?
+  dailyChangePercent Float?
+  totalReturn Float?
+  totalReturnPercent Float?
+  volatility  Float?   // Risk metrics
+  sharpeRatio Float?   // Risk-adjusted return
+  maxDrawdown Float?   // Maximum drawdown
+  beta        Float?   // Market correlation
+  alpha       Float?   // Excess return
+  informationRatio Float? // Active return relative to benchmark
+  sortinoRatio Float?  // Downside risk-adjusted return
+  calmarRatio Float?   // Return relative to maximum drawdown
+  createdAt   DateTime @default(now())
+
+  // Relations
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, date])
+  @@map("portfolio_performance")
+}
+
+// Investment Goals for Goal-Based Investing
+model InvestmentGoal {
+  id          String   @id @default(cuid())
+  portfolioId String
+  name        String
+  description String?
+  targetValue Float
+  targetDate  DateTime
+  currentProgress Float @default(0)
+  status      GoalStatus @default(ACTIVE)
+  priority    GoalPriority @default(MEDIUM)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@map("investment_goals")
+}
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  PAUSED
+  CANCELLED
+}
+
+enum GoalPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// Portfolio Rebalancing
+model PortfolioRebalance {
+  id          String   @id @default(cuid())
+  portfolioId String
+  triggerType RebalanceTriggerType @default(MANUAL)
+  reason      String?
+  status      RebalanceStatus @default(PENDING)
+  beforeValue Float
+  afterValue  Float?
+  deviation   Float?   // Percentage deviation from target
+  executedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  trades      RebalanceTrade[]
+
+  @@map("portfolio_rebalances")
+}
+
+enum RebalanceTriggerType {
+  MANUAL
+  SCHEDULED
+  THRESHOLD
+  MARKET_EVENT
+  PERFORMANCE_BASED
+}
+
+enum RebalanceStatus {
+  PENDING
+  EXECUTING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model RebalanceTrade {
+  id            String   @id @default(cuid())
+  rebalanceId   String
+  portfolioAssetId String
+  action        RebalanceAction
+  amount        Float
+  targetValue   Float?
+  status        TradeStatus @default(PENDING)
+  orderId       String?
+  executedAt    DateTime?
+  createdAt     DateTime @default(now())
+
+  // Relations
+  rebalance     PortfolioRebalance @relation(fields: [rebalanceId], references: [id], onDelete: Cascade)
+  portfolioAsset PortfolioAsset @relation(fields: [portfolioAssetId], references: [id], onDelete: Cascade)
+
+  @@map("rebalance_trades")
+}
+
+enum RebalanceAction {
+  BUY
+  SELL
+  HOLD
+}
+
+enum TradeStatus {
+  PENDING
+  EXECUTED
+  FAILED
+  CANCELLED
+}
+
+// Tax Reporting
+model TaxReport {
+  id          String   @id @default(cuid())
+  portfolioId String
+  year        Int      // Tax year
+  reportType  TaxReportType
+  totalGains  Float?
+  totalLosses Float?
+  netGains    Float?
+  shortTermGains Float?
+  longTermGains Float?
+  costBasis  Float?
+  marketValue Float?
+  status      ReportStatus @default(GENERATING)
+  generatedAt DateTime?
+  filedAt     DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  taxLots     TaxLot[]
+
+  @@unique([portfolioId, year, reportType])
+  @@map("tax_reports")
+}
+
+enum TaxReportType {
+  CAPITAL_GAINS
+  DIVIDEND_INCOME
+  STAKING_REWARDS
+  TRADING_ACTIVITY
+  COMPREHENSIVE
+}
+
+enum ReportStatus {
+  GENERATING
+  COMPLETED
+  ERROR
+  FILED
+}
+
+model TaxLot {
+  id          String   @id @default(cuid())
+  taxReportId String
+  portfolioAssetId String
+  acquisitionDate DateTime
+  acquisitionPrice Float
+  acquisitionCost Float
+  disposalDate DateTime?
+  disposalPrice Float?
+  disposalCost Float?
+  quantity    Float
+  gainLoss    Float?
+  term        TaxTerm @default(SHORT_TERM)
+  createdAt   DateTime @default(now())
+
+  // Relations
+  taxReport   TaxReport @relation(fields: [taxReportId], references: [id], onDelete: Cascade)
+  portfolioAsset PortfolioAsset @relation(fields: [portfolioAssetId], references: [id], onDelete: Cascade)
+
+  @@map("tax_lots")
+}
+
+enum TaxTerm {
+  SHORT_TERM
+  LONG_TERM
+}
+
+// Dividend Tracking
+model Dividend {
+  id          String   @id @default(cuid())
+  portfolioAssetId String
+  amount      Float
+  currency    String
+  exDate      DateTime
+  paymentDate DateTime?
+  taxWithheld Float?
+  reinvested  Boolean @default(false)
+  createdAt   DateTime @default(now())
+
+  // Relations
+  portfolioAsset PortfolioAsset @relation(fields: [portfolioAssetId], references: [id], onDelete: Cascade)
+
+  @@map("dividends")
+}
+
+// Staking Rewards Tracking
+model StakingReward {
+  id          String   @id @default(cuid())
+  portfolioAssetId String
+  amount      Float
+  currency    String
+  rewardType  StakingRewardType
+  apr         Float?   // Annual percentage rate
+  stakingDuration Int? // Duration in days
+  createdAt   DateTime @default(now())
+
+  // Relations
+  portfolioAsset PortfolioAsset @relation(fields: [portfolioAssetId], references: [id], onDelete: Cascade)
+
+  @@map("staking_rewards")
+}
+
+enum StakingRewardType {
+  STAKING
+  LENDING
+  FARMING
+  LIQUIDITY_MINING
+  GOVERNANCE
+}
+
+// DeFi Integration
+model DeFiPosition {
+  id          String   @id @default(cuid())
+  portfolioId String
+  protocol    String   // Uniswap, Aave, Compound, etc.
+  positionType DeFiPositionType
+  assets      Json     // JSON array of assets in the position
+  value       Float
+  apy         Float?   // Annual percentage yield
+  impermanentLoss Float?
+  healthFactor Float?  // For lending positions
+  liquidationPrice Float?
+  status      DeFiStatus @default(ACTIVE)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@map("defi_positions")
+}
+
+enum DeFiPositionType {
+  LENDING
+  BORROWING
+  LIQUIDITY_POOL
+  YIELD_FARMING
+  STAKING
+  GOVERNANCE
+  DERIVATIVES
+}
+
+enum DeFiStatus {
+  ACTIVE
+  INACTIVE
+  LIQUIDATED
+  CLOSED
+}
+
+// NFT Portfolio Support
+model NFT {
+  id          String   @id @default(cuid())
+  portfolioId String
+  tokenId     String
+  contractAddress String
+  name        String?
+  description String?
+  imageUrl    String?
+  collection  String?
+  category    NFTCategory @default(ART)
+  value       Float?
+  purchasePrice Float?
+  purchaseDate DateTime?
+  lastSalePrice Float?
+  lastSaleDate DateTime?
+  royalty     Float?
+  traits      Json?    // NFT traits stored as JSON
+  status      NFTStatus @default(HELD)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@map("nfts")
+}
+
+enum NFTCategory {
+  ART
+  COLLECTIBLES
+  GAMING
+  MUSIC
+  PHOTOGRAPHY
+  SPORTS
+  UTILITY
+  VIRTUAL_WORLDS
+  OTHER
+}
+
+enum NFTStatus {
+  HELD
+  LISTED
+  SOLD
+  TRANSFERRED
+}
+
+// Asset Correlation Analysis
+model AssetCorrelation {
+  id          String   @id @default(cuid())
+  portfolioId String
+  asset1Id    String
+  asset2Id    String
+  correlation Float    // Correlation coefficient (-1 to 1)
+  covariance  Float?
+  period      CorrelationPeriod @default(ONE_YEAR)
+  calculatedAt DateTime @default(now())
+
+  // Relations
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  asset1      Asset     @relation("Asset1Correlation", fields: [asset1Id], references: [id], onDelete: Cascade)
+  asset2      Asset     @relation("Asset2Correlation", fields: [asset2Id], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, asset1Id, asset2Id, period])
+  @@map("asset_correlations")
+}
+
+enum CorrelationPeriod {
+  ONE_MONTH
+  THREE_MONTHS
+  SIX_MONTHS
+  ONE_YEAR
+  TWO_YEARS
+  FIVE_YEARS
+}
+
+// Performance Attribution Analysis
+model PerformanceAttribution {
+  id          String   @id @default(cuid())
+  portfolioId String
+  date        DateTime @default(now())
+  totalReturn Float
+  assetAllocation Float
+  securitySelection Float
+  currencyEffect Float?
+  otherEffects Float?
+  benchmarkReturn Float?
+  activeReturn Float?
+  createdAt   DateTime @default(now())
+
+  // Relations
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, date])
+  @@map("performance_attribution")
+}
+
+// Trading Bot Models
+model TradingBot {
+  id            String   @id @default(cuid())
+  userId        String
+  name          String
+  description   String?
+  type          BotType
+  strategy      Json     // Strategy configuration
+  status        BotStatus @default(STOPPED)
+  marketId      String?
+  exchangeAccountId String?
+  config        Json     // Bot configuration parameters
+  performance   Json?    // Performance metrics
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  startedAt     DateTime?
+  stoppedAt     DateTime?
+
+  // Relations
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trades        Trade[]
+  botExecutions BotExecution[]
+
+  @@map("trading_bots")
+}
+
+enum BotType {
+  GRID
+  DCA
+  MARTINGALE
+  ARBITRAGE
+  MARKET_MAKING
+  TREND_FOLLOWING
+  MEAN_REVERSION
+  CUSTOM
+}
+
+enum BotStatus {
+  STOPPED
+  RUNNING
+  PAUSED
+  ERROR
+  ARCHIVED
+}
+
+model BotExecution {
+  id          String   @id @default(cuid())
+  botId       String
+  action      String   // START, STOP, PAUSE, RESUME, TRADE
+  details     Json     // Execution details
+  status      ExecutionStatus @default(SUCCESS)
+  error       String?
+  createdAt   DateTime @default(now())
+
+  // Relations
+  bot         TradingBot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@map("bot_executions")
+}
+
+enum ExecutionStatus {
+  SUCCESS
+  FAILED
+  PENDING
+}
+
+// Market Data Models
+model MarketData {
+  id          String   @id @default(cuid())
+  marketId    String
+  timestamp   DateTime @default(now())
+  open        Float
+  high        Float
+  low         Float
+  close       Float
+  volume      Float
+  quoteVolume Float?
+  tradesCount Int?
+
+  // Relations
+  market      Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@unique([marketId, timestamp])
+  @@map("market_data")
+}
+
+// NextAuth.js Models (if using NextAuth with database)
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// Blog Models
+model BlogPost {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  content     String   // HTML content
+  excerpt     String?  // Short summary
+  featuredImage String? // URL to featured image
+  status      PostStatus @default(DRAFT)
+  publishedAt DateTime?
+  authorId    String
+  categoryId  String?
+  tags        Json?     // Array of tags stored as JSON
+  seoTitle    String?
+  seoDescription String?
+  viewCount   Int      @default(0)
+  likeCount   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  author      User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  category    BlogCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  comments    BlogComment[]
+
+  @@map("blog_posts")
+}
+
+enum PostStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model BlogCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  color       String?  // Hex color for UI
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  posts       BlogPost[]
+
+  @@map("blog_categories")
+}
+
+model BlogComment {
+  id          String   @id @default(cuid())
+  postId      String
+  authorId    String?
+  guestName   String?
+  guestEmail  String?
+  content     String
+  status      CommentStatus @default(PENDING)
+  parentId    String?  // For nested comments
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  post        BlogPost   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author      User?      @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  parent      BlogComment? @relation("CommentReplies", fields: [parentId], references: [id], onDelete: SetNull)
+  replies     BlogComment[] @relation("CommentReplies")
+
+  @@map("blog_comments")
+}
+
+enum CommentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SPAM
+}
+
+// Additional models for API compatibility
+
+model Comment {
+  id          String   @id @default(cuid())
+  postId      String
+  authorId    String?
+  guestName   String?
+  guestEmail  String?
+  content     String
+  status      CommentStatus @default(PENDING)
+  parentId    String?  // For nested comments
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  post        Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author      User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  parent      Comment? @relation("CommentReplies", fields: [parentId], references: [id], onDelete: SetNull)
+  replies     Comment[] @relation("CommentReplies")
+
+  @@map("comments")
+}
+
+model Post {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  content     String
+  excerpt     String?
+  featuredImage String?
+  authorId    String
+  status      PostStatus @default(DRAFT)
+  publishedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments    Comment[]
+
+  @@map("posts")
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String
+  message     String
+  type        NotificationType
+  status      NotificationStatus @default(UNREAD)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+enum NotificationType {
+  INFO
+  WARNING
+  ERROR
+  SUCCESS
+  TRADE
+  SYSTEM
+  SECURITY
+  BILLING
+  MARKET
+}
+
+enum NotificationStatus {
+  UNREAD
+  READ
+  ARCHIVED
+}
+
+model Webhook {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  url         String
+  secret      String?
+  events      String   // JSON array of event types
+  status      WebhookStatus @default(ACTIVE)
+  lastTrigger DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  webhookEvents WebhookEvent[]
+
+  @@map("webhooks")
+}
+
+enum WebhookStatus {
+  ACTIVE
+  INACTIVE
+  ERROR
+}
+
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  webhookId   String
+  eventType   String
+  payload     Json
+  response    Json?
+  status      WebhookEventStatus @default(PENDING)
+  attempts    Int      @default(0)
+  nextAttempt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  webhook     Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@map("webhook_events")
+}
+
+enum WebhookEventStatus {
+  PENDING
+  SENT
+  FAILED
+  RETRYING
+}
+
+model Page {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  content     String
+  excerpt     String?
+  featuredImage String?
+  authorId    String
+  status      PageStatus @default(DRAFT)
+  publishedAt DateTime?
+  sortOrder   Int      @default(0)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@map("pages")
+}
+
+enum PageStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model SessionBlacklist {
+  id          String   @id @default(cuid())
+  sessionId   String   @unique
+  invalidatedAt DateTime @default(now())
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  @@map("session_blacklists")
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  action      String
+  category    String
+  severity    String
+  ipAddress   String?
+  userAgent   String?
+  details     Json?
+  timestamp   DateTime @default(now())
+
+  // Relations
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}

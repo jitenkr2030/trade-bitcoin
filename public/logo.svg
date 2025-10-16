@@ -1,0 +1,19 @@
+<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Bitcoin Orange Circle Background -->
+  <circle cx="100" cy="100" r="90" fill="#F7931A"/>
+  
+  <!-- Bitcoin Symbol B -->
+  <path d="M70 50V65H80V75H90V85H80V95H90V105H80V115H90V125H80V135H70V125H60V115H50V105H40V95H50V85H40V75H50V65H60V50H70Z" fill="white"/>
+  
+  <!-- Bitcoin Text -->
+  <text x="100" y="170" text-anchor="middle" fill="#F7931A" font-family="Arial, sans-serif" font-size="16" font-weight="bold">TradeBitcoin</text>
+  
+  <!-- Subtle gradient overlay -->
+  <defs>
+    <radialGradient id="gradient" cx="50%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="white" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <circle cx="100" cy="100" r="90" fill="url(#gradient)"/>
+</svg>
